@@ -74,6 +74,7 @@ fn thread_80211(rx: Receiver<ChannelData>) {
             },
             recv(timer) -> _ => {
                 if let Some(ref mut capture) = state.capture {
+                    //WAZNE USTAWIC W USTAWIENIACH INTERFACE INACZEJ NIE ZADZIALA
                     let mut data = vec![
                         //radiotap header
                         0x00, // <-- radiotap version
@@ -84,7 +85,7 @@ fn thread_80211(rx: Receiver<ChannelData>) {
                         0x0c, //<-- tx power
                         0x01, //<-- antenna
                         //ieee80211 header
-                        0x00, 0x00, 0x00, 0x00,
+                        0x48, 0x00, 0x00, 0x00,
                         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                         0x13, 0x22, 0x33, 0x44, 0x55, 0x66,
                         0x13, 0x22, 0x33, 0x44, 0x55, 0x66,
@@ -94,10 +95,10 @@ fn thread_80211(rx: Receiver<ChannelData>) {
                         //finaly some data
                         0x01,//packet id
                     ];
-                    data.extend_from_slice(&state.throttle.to_ne_bytes());
-                    data.extend_from_slice(&state.pitch.to_ne_bytes());
-                    data.extend_from_slice(&state.roll.to_ne_bytes());
-                    data.extend_from_slice(&state.yaw.to_ne_bytes());
+                    data.extend_from_slice(&state.throttle.to_be_bytes());
+                    data.extend_from_slice(&state.pitch.to_be_bytes());
+                    data.extend_from_slice(&state.roll.to_be_bytes());
+                    data.extend_from_slice(&state.yaw.to_be_bytes());
                     println!("sending packet");
                     if let Err(err) = capture.sendpacket(data) {
                         //add err support
