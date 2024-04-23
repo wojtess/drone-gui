@@ -85,7 +85,8 @@ fn thread_80211(rx: Receiver<ChannelData>) {
                         0x0c, //<-- tx power
                         0x01, //<-- antenna
                         //ieee80211 header
-                        0x48, 0x00, 0x00, 0x00,
+                        //it isnt used in our packet version, but pcap wont send anythink if length is too small or smt like that
+                        0x00, 0x00, 0x00, 0x00,
                         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                         0x13, 0x22, 0x33, 0x44, 0x55, 0x66,
                         0x13, 0x22, 0x33, 0x44, 0x55, 0x66,
