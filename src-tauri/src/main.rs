@@ -1,9 +1,9 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use serde::{Serialize, Deserialize};
-use tauri::{CustomMenuItem, Menu, Submenu, State};
+use tauri::{CustomMenuItem, Menu, Submenu, State, Manager, Window};
 use std::fmt::Formatter;
-use std::{thread, option, fmt::Debug};
+use std::{thread, option, fmt::Debug, sync::Arc};
 use std::time::Duration;
 use crossbeam_channel::{select, unbounded, tick, Sender, Receiver};
 
@@ -28,7 +28,7 @@ impl Debug for ControllsData {
     }
 }
 
-fn thread_80211(rx: Receiver<ChannelData>) {
+fn thread_80211(rx: Receiver<ChannelData>, ) {
     let mut state = ControllsData::default();
     let timer = tick(Duration::from_millis(10));
     loop {
@@ -53,11 +53,11 @@ fn thread_80211(rx: Receiver<ChannelData>) {
                                                         state.capture = Some(opened_capture);
                                                     },
                                                     Err(err) => {
-                                                        eprintln!("error while tryint to open capture: {:?}", err);
+                                                        // send_msg(("error while tryint to open capture: {:?}", err).to_string()).expect("Failed to call send_variable");
                                                     }
                                                 }
                                             } else {
-                                                eprintln!("cant create capture obj");
+                                                // send_msg("cant create capture obj".to_string()).expect("Failed to call send_variable");
                                                 //add error support
                                             }
                                             break;
@@ -85,8 +85,7 @@ fn thread_80211(rx: Receiver<ChannelData>) {
                         0x0c, //<-- tx power
                         0x01, //<-- antenna
                         //ieee80211 header
-                        //it isnt used in our packet version, but pcap wont send anythink if length is too small or smt like that
-                        0x00, 0x00, 0x00, 0x00,
+                        0x48, 0x00, 0x00, 0x00,
                         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                         0x13, 0x22, 0x33, 0x44, 0x55, 0x66,
                         0x13, 0x22, 0x33, 0x44, 0x55, 0x66,
@@ -100,10 +99,14 @@ fn thread_80211(rx: Receiver<ChannelData>) {
                     data.extend_from_slice(&state.pitch.to_be_bytes());
                     data.extend_from_slice(&state.roll.to_be_bytes());
                     data.extend_from_slice(&state.yaw.to_be_bytes());
-                    println!("sending packet");
+                    // data.extend_from_slice(&((state.throttle*1000.0)as i64).to_be_bytes());
+                    // data.extend_from_slice(&((state.pitch*1000.0)as i64).to_be_bytes());
+                    // data.extend_from_slice(&((state.roll*1000.0)as i64).to_be_bytes());
+                    // data.extend_from_slice(&((state.yaw*1000.0)as i64).to_be_bytes());
+                    // send_msg("sending packet".to_string()).expect("Failed to call send_variable");
                     if let Err(err) = capture.sendpacket(data) {
                         //add err support
-                        eprintln!("error while sending packet: {:?}", err);
+                        // send_msg(("error while sending packet: {:?}", err).to_string()).expect("Failed to call send_variable");
                     }
                 }
             }
@@ -153,25 +156,36 @@ fn get_devices() -> Vec<Device> {
 
 #[tauri::command]
 fn set_device(state: State<Sender<ChannelData>>, device: Device) {
-    println!("set_device");
+    send_msg(state, "set_device".to_string());
     state.send(ChannelData::UseDevice(device));
 }
 
-fn main() {
+#[derive(Clone, serde::Serialize)]
+struct Payload {
+  message: String,
+}
 
-    let (tx, rx) = unbounded();
+#[tauri::command]
+fn send_msg(state: State<Sender<ChannelData>>, variable: String) {
+    // event.emit("variable_sent", Some(variable))
+}
+
+fn main() {
     
+    let (tx, rx) = unbounded();
+
     thread::spawn(move || {
-        thread_80211(rx);
+        thread_80211(rx, a);
     });
+    
 
     let settings = CustomMenuItem::new("settings".to_string(), "Settings");
     let file_submenu = Submenu::new("File", Menu::new().add_item(settings));
     let menu = Menu::new()
         .add_submenu(file_submenu);
 
-    tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![set_controlls, get_devices, set_device])
+    let app = tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![set_controlls, get_devices, set_device, send_msg])
         .menu(menu)
         .on_menu_event(|event| {
             match event.menu_item_id() {
@@ -180,6 +194,9 @@ fn main() {
                 }
                 _ => {}
             }
+        })
+        .setup(|app| {
+            
         })
         .manage(tx)
         .run(tauri::generate_context!())
