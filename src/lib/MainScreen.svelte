@@ -1,5 +1,6 @@
 <script>
 import { createEventDispatcher } from 'svelte';
+import { onMount } from 'svelte';
 
 const dispatch = createEventDispatcher();
 
@@ -72,6 +73,16 @@ function mouseScrollerOnCenter(event) {
     dispatch("controlsChange", controls);
 }
 
+
+  
+  let variable = '';
+
+  // Listen for the event emitted by Tauri
+    window.tauri.event.listen('variable_sent', (receivedVariable) => {
+    // Update the component's state with the received variable
+    variable = receivedVariable;
+  });
+
 </script>
 
 <!-- <button on:click={() => (dispatch('screenChange', 'main'))}>change</button> -->
@@ -97,8 +108,18 @@ function mouseScrollerOnCenter(event) {
         <div class="data">
             <p>rrsi: -20db</p>
             <p>last packet sent: 10ms</p>
-            <p>last response: 10ms</p></div>
+            <p>last response: 10ms</p>
         </div>
+
+    </div>  
+    <div class="error-message">
+        <div class="header">
+            <p>Errors</p>
+        </div>
+        <div class="data">
+            <p>{variable}</p>
+        </div>
+    </div>
 </div>
 
 
@@ -128,9 +149,9 @@ function mouseScrollerOnCenter(event) {
 .main {
     border: solid rgb(91, 189, 219);
     display: grid;
-    grid:
-        "leftSide body rightSide" 1fr
-        / 250px auto 250px;
+    grid-template-areas:
+            "leftSide body rightTop"
+            "leftSide body rightBottom";
     gap: 0px;
     height: 100%;
 }
@@ -146,7 +167,7 @@ function mouseScrollerOnCenter(event) {
     border: solid rgb(80, 221, 167) 2px;
     margin: 2px;
 
-    grid-area: rightSide;
+    grid-area: rightTop;
 }
 
 .drone p {
@@ -161,5 +182,13 @@ function mouseScrollerOnCenter(event) {
 
     grid-area: leftSide;
 }
-
+.error-message p {
+    margin-top: -0.0em;
+    margin-bottom: -0.0em;
+}
+.error-message {
+    border: solid rgb(80, 221, 167) 2px;
+    margin: 2px;
+    grid-area: rightBottom;
+    }
 </style>
