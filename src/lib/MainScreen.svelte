@@ -74,15 +74,6 @@ function mouseScrollerOnCenter(event) {
 }
 
 
-  
-  let variable = '';
-
-  // Listen for the event emitted by Tauri
-    window.tauri.event.listen('variable_sent', (receivedVariable) => {
-    // Update the component's state with the received variable
-    variable = receivedVariable;
-  });
-
 </script>
 
 <!-- <button on:click={() => (dispatch('screenChange', 'main'))}>change</button> -->
@@ -117,7 +108,7 @@ function mouseScrollerOnCenter(event) {
             <p>Errors</p>
         </div>
         <div class="data">
-            <p>{variable}</p>
+            <p>kdapokdpoka</p>
         </div>
     </div>
 </div>
@@ -149,9 +140,10 @@ function mouseScrollerOnCenter(event) {
 .main {
     border: solid rgb(91, 189, 219);
     display: grid;
-    grid-template-areas:
+    grid-template:
             "leftSide body rightTop"
-            "leftSide body rightBottom";
+            "leftSide body rightBottom"
+            / 250px auto 250px;
     gap: 0px;
     height: 100%;
 }
