@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use deku::{DekuContainerRead, DekuContainerWrite, DekuRead, DekuUpdate, DekuWrite};
 use serde::{Serialize, Deserialize};
-use tauri::{CustomMenuItem, Menu, Submenu, State};
+use tauri::{CustomMenuItem, Manager, Menu, State, Submenu};
 use std::fmt::Formatter;
 use std::sync::Mutex;
 use std::{fmt::Debug, sync::Arc};
@@ -16,7 +16,8 @@ struct ControllsData {
     pitch: f64,
     roll: f64,
     yaw: f64,
-    capture: Option<pcap::Capture<pcap::Active>>,
+    rx_capture: Option<pcap::Capture<pcap::Active>>,
+    tx_capture: Option<pcap::Capture<pcap::Active>>,
 }
 
 impl Debug for ControllsData {
@@ -61,7 +62,7 @@ impl PacketOut for PacketOut0x01 {
     }
 
     fn id(&self) -> u8 {
-        0x01 
+        0x01
     }
 }
 
@@ -118,44 +119,57 @@ fn add_ieee_header(packet: Box<dyn PacketOut>) -> Vec<u8> {
         0x13, 0x22, 0x33, 0x44, 0x55, 0x66,
         0x00, 0x00,
         //magic number
-        0x3C, 0x4A,
+        0x3C, 0x4A,//header
         //finaly some data
     ];
-    data.extend_from_slice(&[packet.id()]);
+    data.extend_from_slice(&[packet.id()]);//header
     data.extend_from_slice(&*packet.encode());
+    println!("len: {}", (*packet.encode()).len());
     data
 }
 
-fn thread_recieve(state: Arc<Mutex<ControllsData>>) {
-    let timer = tick(Duration::from_millis(10));
+fn thread_recieve(state: Arc<Mutex<ControllsData>>, app_handle: tauri::AppHandle) {
+    let timer = tick(Duration::from_millis(500));
     loop {
         select! {
             recv(timer) -> _ => {
-                let mut state = state.lock().unwrap();
-                if let Some(ref mut capture) = state.capture {
-                    while let Ok(packet) = capture.next_packet() {
-                        let mut len = packet.header.caplen;
-                        let mut buf = packet.data.to_vec();
-                        if buf[0] != 0x48 {
-                            continue;
-                        }
-                        len -= 24;
-                        buf.drain(0..24);
-                        if len < 2/* maginc number */ + 1 {
-                            continue;
-                        }
-                        if buf[1] == 0x3C && buf[2] == 0x4A {
-                            buf.drain(0..2);
-                            len -= 2;
-                            match buf[3] {
-                                1 => {
-                                    let _ = PacketIn0x01::from_bytes((&buf[..], len as usize));
-                                },
-                                _ => {/* wrong id */},
+                // println!("[RECV]BEFORE LOCK");
+                {
+                    app_handle.emit_all("error", "example_error").unwrap();
+                    let mut maybe_capture = {
+                        let mut state = state.lock().unwrap();
+                        state.rx_capture.take()
+                    };
+                    if let Some(ref mut capture) = maybe_capture {
+                        while let Ok(packet) = capture.next_packet() {
+                            let mut len = packet.header.caplen;
+                            let mut buf = packet.data.to_vec();
+                            if buf[0] != 0x48 {
+                                continue;
+                            }
+                            len -= 24;
+                            buf.drain(0..24);
+                            if len < 2/* maginc number */ + 1 {
+                                continue;
+                            }
+                            if buf[1] == 0x3C && buf[2] == 0x4A {
+                                buf.drain(0..2);
+                                len -= 2;//TODO: check if there shuld be 3
+                                match buf[3] {
+                                    1 => {
+                                        let _ = PacketIn0x01::from_bytes((&buf[..], len as usize));
+                                    },
+                                    _ => {/* wrong id */},
+                                }
                             }
                         }
                     }
+                    if let Some(capture) = maybe_capture {
+                        let mut state = state.lock().unwrap();
+                        state.tx_capture = Some(capture);
+                    }
                 }
+                // println!("[RECV]AFTER LOCK");
             }
         }
     }
@@ -180,12 +194,14 @@ fn thread_80211(rx: Receiver<ChannelData>, _: tauri::AppHandle, state: Arc<Mutex
                                 Ok(devices) => {
                                     for d in devices {
                                         if d.name == device.name {
-                                            if let Ok(capture) = pcap::Capture::from_device(d.clone()) {
-                                                match capture.open() {
+                                            if let Ok(mut capture_rx) = pcap::Capture::from_device(d.clone()) {
+                                                capture_rx = capture_rx.timeout(100);
+
+                                                match capture_rx.open() {
                                                     Ok(opened_capture) => {
-                                                        println!("setting capture");
+                                                        println!("setting rx capture");
                                                         let mut state = state.lock().unwrap();
-                                                        state.capture = Some(opened_capture);
+                                                        state.rx_capture = Some(opened_capture);
                                                     },
                                                     Err(err) => {
                                                         println!("err setting capture, {:?}", err)
@@ -195,6 +211,13 @@ fn thread_80211(rx: Receiver<ChannelData>, _: tauri::AppHandle, state: Arc<Mutex
                                             } else {
                                                 // send_msg("cant create capture obj".to_string()).expect("Failed to call send_variable");
                                                 //add error support
+                                            }
+                                            if let Ok(mut capture_tx) = pcap::Capture::from_device(d.clone()) {
+                                                capture_tx = capture_tx.immediate_mode(true);
+                                                if let Ok(opened_capture) = capture_tx.open() {
+                                                    let mut state = state.lock().unwrap();
+                                                    state.tx_capture = Some(opened_capture);
+                                                }
                                             }
                                             break;
                                         }
@@ -210,13 +233,19 @@ fn thread_80211(rx: Receiver<ChannelData>, _: tauri::AppHandle, state: Arc<Mutex
             },
             recv(packets) -> input => {
                 if let Ok(packet) = input {
-                    let mut state0 = state.lock().unwrap();
-                    let data = add_ieee_header(packet);
-                    if let Some(ref mut capture) = state0.capture {
-                        if let Err(_) = capture.sendpacket(data) {
-                            //TODO: add error
+                    // println!("[SEND] TRYING TO LOCK STATE");
+                    {
+                        let mut state0 = state.lock().unwrap();
+                        // println!("sending packet id {:?}", packet.id());
+                        if let Some(tx) = &mut state0.tx_capture {
+                            let data = add_ieee_header(packet);
+                            if let Err(err) = tx.sendpacket(data) {
+                                //TODO: add error
+                                println!("err while sending packet {:?}", err)
+                            }
                         }
                     }
+                    // println!("[SEND] LOCK AFTER");
                 }
             }
         }
@@ -275,57 +304,63 @@ struct Payload {
 }
 
 fn main() {
-    
+
     let (tx, rx) = unbounded();
     let (tx_packets, rx_packets) = unbounded::<Box<(dyn PacketOut + Send + 'static)>>();
 
-    
+
     let state = Arc::new(Mutex::new(ControllsData::default()));
-    let state0 = Arc::clone(&state);
-    
+    let state_80211_thread = Arc::clone(&state);
+    let state_reciver = Arc::clone(&state);
+    let state_tramsiter = Arc::clone(&state);
+
 
     let settings = CustomMenuItem::new("settings".to_string(), "Settings");
     let file_submenu = Submenu::new("File", Menu::new().add_item(settings));
     let menu = Menu::new()
         .add_submenu(file_submenu);
 
-    {
-        let state1 = Arc::clone(&state);
-        tauri::async_runtime::spawn(async move {
-            thread_recieve(state1);
-        });
-    }
-   
-    {
-        let state2 = Arc::clone(&state);
-        tauri::async_runtime::spawn(async move {
-            let timer = tick(Duration::from_millis(10));
-            loop {
-                select! {
-                    recv(timer) -> _ => {
-                        let state = state2.lock().unwrap();
-                        let packet = PacketOut0x03 {
-                            pitch: (state.pitch * 4294967295.0 / 100.0) as u32,
-                            roll: (state.roll * 4294967295.0 / 100.0) as u32,
-                            throttle: (state.throttle * 4294967295.0 / 100.0) as u32,
-                            yaw: (state.yaw * 4294967295.0 / 100.0) as u32
-                        };
-                        let _ = tx_packets.send(Box::new(packet));
-                    }
-                }
-            }
-        });
-    }
-    
 
     let _app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![set_controlls, get_devices, set_device])
         .menu(menu)
         .setup(|app| {
-            let app_hanlder=app.handle();
-            tauri::async_runtime::spawn(async move {
-                thread_80211(rx, app_hanlder, state0, rx_packets);
-            });
+
+
+            {
+                let app_hanlder=app.handle();
+                tauri::async_runtime::spawn(async move {
+                    thread_recieve(state_reciver, app_hanlder);
+                });
+            }
+
+            {
+                let app_hanlder=app.handle();
+                tauri::async_runtime::spawn(async move {
+                    let timer = tick(Duration::from_millis(50));
+                    loop {
+                        select! {
+                            recv(timer) -> _ => {
+                                let state = state_tramsiter.lock().unwrap();
+                                let packet = PacketOut0x01 {
+                                    throttle: state.throttle.to_bits().to_be(),
+                                    pitch: state.pitch.to_bits().to_be(),
+                                    roll: state.roll.to_bits().to_be(),
+                                    yaw: state.yaw.to_bits().to_be(),
+                                };
+                                let _ = tx_packets.send(Box::new(packet));
+                            }
+                        }
+                    }
+                });
+            }
+            {
+                let app_hanlder=app.handle();
+                tauri::async_runtime::spawn(async move {
+                    thread_80211(rx, app_hanlder, state_80211_thread, rx_packets);
+                });
+            }
+
             Ok(())
         })
         .on_menu_event(|event| {

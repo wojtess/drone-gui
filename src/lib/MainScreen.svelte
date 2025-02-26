@@ -1,6 +1,7 @@
 <script>
 import { createEventDispatcher } from 'svelte';
 import { onMount } from 'svelte';
+import ErrorWindow from './ErrorWindow.svelte';
 
 const dispatch = createEventDispatcher();
 
@@ -108,7 +109,7 @@ function mouseScrollerOnCenter(event) {
             <p>Errors</p>
         </div>
         <div class="data">
-            <p>kdapokdpoka</p>
+            <ErrorWindow></ErrorWindow>
         </div>
     </div>
 </div>
@@ -116,11 +117,16 @@ function mouseScrollerOnCenter(event) {
 
 <style>
 
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+}
+
 .drone > .data {
     padding-top: 8px;
     padding-left: 5px;
 }
-
 .communication p {
     margin-top: -0.0em;
     margin-bottom: -0.0em;
@@ -138,15 +144,15 @@ function mouseScrollerOnCenter(event) {
 }
 
 .main {
-    border: solid rgb(91, 189, 219);
-    display: grid;
-    grid-template:
-            "leftSide body rightTop"
-            "leftSide body rightBottom"
-            / 250px auto 250px;
-    gap: 0px;
     height: 100%;
-}
+    display: grid;
+    grid-template-areas:
+        "leftSide body rightTop"
+        "leftSide body rightBottom";
+    grid-template-rows: 1fr 1fr;
+    grid-template-columns: 250px auto 250px;
+    gap: 0px;
+    }
 
 .center {
     border: solid rgb(80, 221, 167) 2px;
@@ -179,8 +185,40 @@ function mouseScrollerOnCenter(event) {
     margin-bottom: -0.0em;
 }
 .error-message {
+    height: calc(100% - 4px);
+    grid-area: rightBottom;
     border: solid rgb(80, 221, 167) 2px;
     margin: 2px;
-    grid-area: rightBottom;
-    }
+    overflow: auto;
+    box-sizing: border-box;
+}
+
+.error-message .data {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+/* Style for scrollbar in WebKit browsers */
+.error-message .data::-webkit-scrollbar {
+    width: 12px;
+}
+
+.error-message .data::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.error-message .data::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 6px;
+}
+
+.error-message .data::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Style for scrollbar in Firefox */
+.error-message .data {
+    scrollbar-width: thin;
+    scrollbar-color: #888 #f1f1f1;
+}
 </style>
